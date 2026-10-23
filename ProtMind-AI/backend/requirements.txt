@@ -8,3 +8,7 @@ plotly
 fpdf
 matplotlib
 numpy
+pennylane
+torch
+scikit-learn
+joblib

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import * as $3Dmol from "3dmol";
 import Plotly from "plotly.js-dist-min";
-import { postJson, validateInput, fetchReportPdf } from "./api";
+import { postJson, validateInput, fetchReportPdf, fetchQmlPrediction } from "./api";
 
 /* ---------- shared helpers ---------- */
 
@@ -1254,7 +1254,8 @@ function getNormalizedXai(data, payload = {}) {
     recommended_follow_ups: Array.isArray(raw.recommended_follow_ups) && raw.recommended_follow_ups.length > 0 ? raw.recommended_follow_ups : [
       { type: "Wet-Lab Assay", title: "Thermal Shift Assay (nanoDSF)", desc: "Quantify melting temperature shift (Tm) experimentally." },
       { type: "Computational", title: "Molecular Dynamics (MD) Simulation", desc: "Run 100 ns explicit solvent MD simulation to evaluate dynamic fluctuations." }
-    ]
+    ],
+    qml: raw.qml || data?.qml || null
   };
 }
 
@@ -1333,49 +1334,79 @@ export function Step8({ payload }) {
   );
 }
 
-/* ---------- STEP 9: Explainable Intelligence Summary ---------- */
+/* ---------- STEP 9: Explainable Intelligence Summary & Quantum Machine Learning ---------- */
 export function Step9({ payload }) {
   const [state, setState] = useState({ loading: true, data: null, error: "" });
   const [activeTab, setActiveTab] = useState("overview");
+  const [qmlData, setQmlData] = useState(null);
+  const [qmlLoading, setQmlLoading] = useState(false);
+  const [qmlError, setQmlError] = useState("");
 
   useEffect(() => {
     let alive = true;
     setState({ loading: true, data: null, error: "" });
+    setQmlLoading(true);
+    setQmlError("");
 
-    async function loadXai() {
+    async function loadData() {
       try {
         const res = await postJson("/api/step9", payload);
-        // Check if res has xai format or legacy drug format
-        if (res && res.verdict && res.workflow_trace) {
-          if (alive) setState({ loading: false, data: res, error: "" });
-          return;
+        if (alive) {
+          setState({ loading: false, data: res, error: "" });
+          if (res && res.qml && res.qml.ok) {
+            setQmlData(res.qml);
+            setQmlLoading(false);
+          }
         }
-        // If legacy response, query /api/step9/explain
-        try {
-          const res2 = await postJson("/api/step9/explain", payload);
-          if (alive) setState({ loading: false, data: res2, error: "" });
-        } catch {
-          // If explain endpoint also unavailable, normalize what we have
-          if (alive) setState({ loading: false, data: res || {}, error: "" });
+
+        // If backend did not embed qml, fetch from dedicated endpoint
+        if (!res || !res.qml || !res.qml.ok) {
+          try {
+            const qRes = await fetchQmlPrediction(payload);
+            if (alive) {
+              setQmlData(qRes);
+              setQmlLoading(false);
+            }
+          } catch (qErr) {
+            if (alive) {
+              setQmlError(qErr.message || "Failed to load QML prediction");
+              setQmlLoading(false);
+            }
+          }
         }
       } catch (err1) {
+        // Fallback for older or split endpoints
         try {
-          const res2 = await postJson("/api/step9/explain", payload);
-          if (alive) setState({ loading: false, data: res2, error: "" });
-        } catch (err2) {
-          // If both fail, normalize dynamically from payload so user never gets a blank screen!
-          if (alive) setState({ loading: false, data: {}, error: "" });
+          const [res2, qRes] = await Promise.allSettled([
+            postJson("/api/step9/explain", payload),
+            fetchQmlPrediction(payload)
+          ]);
+          if (alive) {
+            const d = res2.status === "fulfilled" ? res2.value : {};
+            const q = qRes.status === "fulfilled" ? qRes.value : null;
+            setState({ loading: false, data: d, error: "" });
+            if (q) setQmlData(q);
+            else if (d.qml) setQmlData(d.qml);
+            setQmlLoading(false);
+          }
+        } catch {
+          if (alive) {
+            setState({ loading: false, data: {}, error: "" });
+            setQmlLoading(false);
+          }
         }
       }
     }
 
-    loadXai();
+    loadData();
     return () => { alive = false; };
   }, [payload]);
 
   if (state.loading) return <Loading text="🧠 Synthesizing multi-evidence proteomic rationale and explainable AI verdict..." />;
 
   const xai = getNormalizedXai(state.data, payload);
+  const effectiveQml = qmlData || xai.qml;
+
   const verdictKind = xai.verdict_code === "pathogenic"
     ? "error"
     : xai.verdict_code === "likely_pathogenic"
@@ -1405,13 +1436,14 @@ export function Step9({ payload }) {
         </div>
 
         <Notice kind="info">
-          🛡️ <b>Transparent Research Evidence:</b> Every conclusion below is directly traced from biophysical potential calculations, evolutionary conservation scores, and verified database annotations. Computational predictions are explicitly distinguished from experimentally validated data.
+          🛡️ <b>Transparent Research Evidence:</b> Every conclusion below is directly traced from biophysical potential calculations, evolutionary conservation scores, quantum machine learning statevector simulations, and verified database annotations. Computational predictions are explicitly distinguished from experimentally validated data.
         </Notice>
 
         {/* Tab Navigation */}
         <div className="xai-nav-tabs">
           {[
             { id: "overview", label: "📋 Overview & Summary" },
+            { id: "qml", label: "⚛️ Quantum ML & Classical Baseline" },
             { id: "workflow", label: "🔄 Workflow Trajectory" },
             { id: "matrix", label: "📊 Evidence Matrix" },
             { id: "comparison", label: "⚖️ Supporting vs Conflicting" },
@@ -1448,6 +1480,46 @@ export function Step9({ payload }) {
             </Panel>
           </div>
 
+          {/* Quick-glance Quantum ML & Classical Baseline Summary */}
+          <Panel title="⚛️ Quantum Machine Learning & Classical Baseline Verdict">
+            <div className="energy-grid">
+              <div className="energy-card">
+                <small>PennyLane Hybrid QNN</small>
+                <b className={effectiveQml?.qnn_prediction?.predicted_class === "Pathogenic" ? "bad-text" : "good-text"}>
+                  {effectiveQml?.qnn_prediction?.predicted_class || (qmlLoading ? "Simulating..." : "Available")}
+                </b>
+                <span>P(Pathogenic) = {effectiveQml?.qnn_prediction?.probability_pathogenic !== undefined ? effectiveQml.qnn_prediction.probability_pathogenic : "N/A"}</span>
+              </div>
+              <div className="energy-card">
+                <small>HistGradientBoosting Baseline</small>
+                <b className={effectiveQml?.classical_prediction?.predicted_class === "Pathogenic" ? "bad-text" : "good-text"}>
+                  {effectiveQml?.classical_prediction?.predicted_class || (qmlLoading ? "Computing..." : "Available")}
+                </b>
+                <span>P(Pathogenic) = {effectiveQml?.classical_prediction?.probability_pathogenic !== undefined ? effectiveQml.classical_prediction.probability_pathogenic : "N/A"}</span>
+              </div>
+              <div className="energy-card">
+                <small>Physicochemical Deltas</small>
+                <b>ΔH: {effectiveQml?.features?.hydrophobicity_delta ?? "0.0"}</b>
+                <span>ΔQ: {effectiveQml?.features?.charge_delta ?? "0.0"}e | ΔM: {effectiveQml?.features?.mass_delta ?? "0.0"} Da</span>
+              </div>
+              <div className="energy-card">
+                <small>Model Consensus</small>
+                <b>{effectiveQml?.models_agree ? "✅ Concordant" : "⚠️ Evaluated"}</b>
+                <span>{effectiveQml?.models_agree ? "Both classify concordantly" : "Inspect feature breakdown"}</span>
+              </div>
+            </div>
+            <div style={{ marginTop: "12px", display: "flex", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                className="xai-tab-btn active"
+                style={{ cursor: "pointer", fontSize: "12px" }}
+                onClick={() => setActiveTab("qml")}
+              >
+                ⚛️ View Detailed Quantum Circuit, Features & Benchmarks →
+              </button>
+            </div>
+          </Panel>
+
           <Panel title="📈 Key Pipeline Diagnostics Summary">
             <div className="energy-grid">
               <div className="energy-card">
@@ -1480,7 +1552,248 @@ export function Step9({ payload }) {
         </div>
       )}
 
-      {/* TAB 2: Workflow Trajectory */}
+      {/* TAB 2: Quantum ML & Classical Baseline */}
+      {activeTab === "qml" && (
+        <div className="xai-tab-content qml-wrap">
+          {qmlLoading && <Loading text="⚛️ Initializing PennyLane default.qubit simulator and evaluating variational quantum circuit..." />}
+          {qmlError && <Notice kind="warning">⚠️ Notice: {qmlError}</Notice>}
+
+          {/* Research & Regulatory Disclaimer Banner */}
+          <Notice kind="info">
+            🛡️ <b>Experimental Research Prototype:</b> This Quantum Neural Network (QNN) operates on PennyLane's <code>default.qubit</code> statevector simulator using a 3-qubit parameterized ansatz trained on ClinVar-derived missense variants. It investigates variational quantum representations on classical hardware; it does <b>not</b> claim quantum computational advantage over classical algorithms, is <b>not</b> clinically validated, and does <b>not</b> directly fold protein structures or compute thermodynamic stability free energies.
+          </Notice>
+
+          {effectiveQml?.sequence_validation && (
+            <Notice kind={effectiveQml.sequence_validation.verified ? "success" : "warning"}>
+              {effectiveQml.sequence_validation.verified ? "✅" : "⚠️"} <b>Sequence Verification:</b> {effectiveQml.sequence_validation.message}
+            </Notice>
+          )}
+
+          {/* Model Prediction Cards Grid */}
+          <div className="qml-grid">
+            {/* PennyLane QNN Card */}
+            <div className="qml-card quantum">
+              <div className="qml-card-header">
+                <div>
+                  <h4>⚛️ PennyLane Variational QNN</h4>
+                  <small style={{ color: "#6366f1", fontWeight: 600 }}>Quantum Statevector Simulation</small>
+                </div>
+                <span className="qml-badge quantum">default.qubit</span>
+              </div>
+
+              <div className="qml-pred-box">
+                <div>
+                  <span className="qml-pred-title">Predicted Class</span>
+                  <div className={`qml-pred-class ${effectiveQml?.qnn_prediction?.predicted_class?.toLowerCase() || ""}`}>
+                    {effectiveQml?.qnn_prediction?.predicted_class || "Evaluating..."}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <span className="qml-pred-title">Decision Threshold</span>
+                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#475569" }}>
+                    ≥ {effectiveQml?.qnn_prediction?.threshold ?? 0.5}
+                  </div>
+                </div>
+              </div>
+
+              <div className="qml-meter-wrap">
+                <div className="qml-meter-labels">
+                  <span>Benign (0.0)</span>
+                  <span><b>P(Pathogenic): {effectiveQml?.qnn_prediction?.probability_pathogenic ?? "N/A"}</b></span>
+                  <span>Pathogenic (1.0)</span>
+                </div>
+                <div className="qml-meter-bar">
+                  <div
+                    className={`qml-meter-fill ${effectiveQml?.qnn_prediction?.predicted_class?.toLowerCase() || "benign"}`}
+                    style={{ width: `${Math.min(100, Math.max(0, (effectiveQml?.qnn_prediction?.probability_pathogenic ?? 0.5) * 100))}%` }}
+                  />
+                  <div className="qml-meter-threshold" title="Decision boundary = 0.50" />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10.5px", color: "#64748b" }}>
+                  <span>P(Benign): {effectiveQml?.qnn_prediction?.probability_benign ?? "N/A"}</span>
+                  <span>Boundary Margin: {effectiveQml?.qnn_prediction?.relative_confidence_pct ?? 0}%</span>
+                </div>
+              </div>
+
+              <ul className="qml-meta-list">
+                <li><span>Quantum Wires (Qubits):</span> <b>{effectiveQml?.qnn_prediction?.qubits ?? 3}</b></li>
+                <li><span>Strongly Entangling Layers:</span> <b>{effectiveQml?.qnn_prediction?.entangling_layers ?? 2}</b></li>
+                <li><span>Embedding Technique:</span> <b>AngleEmbedding (Rotation Y)</b></li>
+                <li><span>Measurement Operator:</span> <b>Pauli-Z Expectation &lang;Z₀&rang;</b></li>
+                <li><span>Execution Backend:</span> <b>PennyLane + PyTorch Interface</b></li>
+              </ul>
+            </div>
+
+            {/* Classical HistGradientBoosting Card */}
+            <div className="qml-card classical">
+              <div className="qml-card-header">
+                <div>
+                  <h4>🌳 HistGradientBoosting Baseline</h4>
+                  <small style={{ color: "#0284c7", fontWeight: 600 }}>Classical Ensemble Model</small>
+                </div>
+                <span className="qml-badge classical">Scikit-Learn</span>
+              </div>
+
+              <div className="qml-pred-box">
+                <div>
+                  <span className="qml-pred-title">Predicted Class</span>
+                  <div className={`qml-pred-class ${effectiveQml?.classical_prediction?.predicted_class?.toLowerCase() || ""}`}>
+                    {effectiveQml?.classical_prediction?.predicted_class || "Evaluating..."}
+                  </div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <span className="qml-pred-title">Decision Threshold</span>
+                  <div style={{ fontSize: "14px", fontWeight: 700, color: "#475569" }}>
+                    ≥ {effectiveQml?.classical_prediction?.threshold ?? 0.5}
+                  </div>
+                </div>
+              </div>
+
+              <div className="qml-meter-wrap">
+                <div className="qml-meter-labels">
+                  <span>Benign (0.0)</span>
+                  <span><b>P(Pathogenic): {effectiveQml?.classical_prediction?.probability_pathogenic ?? "N/A"}</b></span>
+                  <span>Pathogenic (1.0)</span>
+                </div>
+                <div className="qml-meter-bar">
+                  <div
+                    className={`qml-meter-fill ${effectiveQml?.classical_prediction?.predicted_class?.toLowerCase() || "benign"}`}
+                    style={{ width: `${Math.min(100, Math.max(0, (effectiveQml?.classical_prediction?.probability_pathogenic ?? 0.5) * 100))}%` }}
+                  />
+                  <div className="qml-meter-threshold" title="Decision boundary = 0.50" />
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", fontSize: "10.5px", color: "#64748b" }}>
+                  <span>P(Benign): {effectiveQml?.classical_prediction?.probability_benign ?? "N/A"}</span>
+                  <span>Boundary Margin: {effectiveQml?.classical_prediction?.relative_confidence_pct ?? 0}%</span>
+                </div>
+              </div>
+
+              <ul className="qml-meta-list">
+                <li><span>Algorithm:</span> <b>Histogram Gradient Boosting Trees</b></li>
+                <li><span>Max Iterations:</span> <b>120 estimators (lr = 0.08)</b></li>
+                <li><span>Preprocessing:</span> <b>SimpleImputer(median) + StandardScaler</b></li>
+                <li><span>Feature Order:</span> <b>[ΔHydrophobicity, ΔCharge, ΔMass]</b></li>
+                <li><span>Model Consensus:</span> <b>{effectiveQml?.models_agree ? "Agrees with QNN" : "Differs from QNN"}</b></li>
+              </ul>
+            </div>
+          </div>
+
+          {/* Model Consensus Analysis */}
+          {effectiveQml?.consensus_note && (
+            <Notice kind={effectiveQml.models_agree ? "success" : "info"}>
+              <b>Consensus Synthesis:</b> {effectiveQml.consensus_note}
+            </Notice>
+          )}
+
+          {/* Physicochemical Feature Breakdown */}
+          <Panel title="🧪 The 3 Physicochemical Delta Features Used in Model Training">
+            <p className="muted-text">
+              The exact three delta features calculated between wildtype <b>{effectiveQml?.ref_name || effectiveQml?.ref_aa}</b> and mutant <b>{effectiveQml?.alt_name || effectiveQml?.alt_aa}</b> at position {effectiveQml?.position}:
+            </p>
+
+            <div className="qml-feature-grid">
+              {(effectiveQml?.feature_breakdown || [
+                {
+                  feature: "Hydrophobicity Delta",
+                  value: effectiveQml?.features?.hydrophobicity_delta ?? 0,
+                  unit: "Kyte-Doolittle Index",
+                  interpretation: "Shifts solvent accessibility and internal core packing preferences.",
+                  quantum_role: "Rotates qubit 0 on the Bloch sphere along the Y-axis via AngleEmbedding."
+                },
+                {
+                  feature: "Charge Delta",
+                  value: effectiveQml?.features?.charge_delta ?? 0,
+                  unit: "Elementary charge (e)",
+                  interpretation: "Alters local electrostatic potential and potential salt bridge pairs.",
+                  quantum_role: "Rotates qubit 1 on the Bloch sphere along the Y-axis via AngleEmbedding."
+                },
+                {
+                  feature: "Molecular Mass Delta",
+                  value: effectiveQml?.features?.mass_delta ?? 0,
+                  unit: "Daltons (Da)",
+                  interpretation: "Induces steric clashes (if positive) or cavity creation (if negative).",
+                  quantum_role: "Rotates qubit 2 on the Bloch sphere along the Y-axis via AngleEmbedding."
+                }
+              ]).map((fb, idx) => (
+                <div key={idx} className="qml-feature-card">
+                  <div className="qml-feature-header">
+                    <span className="qml-feature-title">{fb.feature}</span>
+                    <span className="qml-feature-val">{fb.value > 0 ? `+${fb.value}` : fb.value}</span>
+                  </div>
+                  <small style={{ color: "#0284c7", fontWeight: 700 }}>{fb.unit}</small>
+                  <p className="qml-feature-desc">{fb.interpretation}</p>
+                  <div className="qml-feature-qubit">⚛️ {fb.quantum_role}</div>
+                </div>
+              ))}
+            </div>
+          </Panel>
+
+          {/* Benchmark Matrix */}
+          <Panel title="📊 Held-Out Test Set Benchmark Comparison (ClinVar Gene-Split Partition, N=1,500)">
+            <Notice kind="info">
+              Independent evaluation conducted on held-out genes not present in training data (GroupShuffleSplit by <code>gene_id</code>). All models were tested on the identical 1,500 held-out ClinVar test rows.
+            </Notice>
+
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Model Architecture</th>
+                    <th>ROC-AUC Score</th>
+                    <th>Accuracy</th>
+                    <th>Balanced Acc</th>
+                    <th>Precision (Pathogenic)</th>
+                    <th>Recall (Pathogenic)</th>
+                    <th>F1 Score</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(effectiveQml?.benchmarks || [
+                    { model: "PennyLane QNN (Quantum)", roc_auc: 0.6649, accuracy: 73.73, balanced_accuracy: 57.62, precision_pathogenic: 52.27, recall_pathogenic: 22.89, f1_pathogenic: 0.3183 },
+                    { model: "HistGradientBoosting (Classical)", roc_auc: 0.7084, accuracy: 73.33, balanced_accuracy: 60.50, precision_pathogenic: 50.38, recall_pathogenic: 32.84, f1_pathogenic: 0.3976 },
+                    { model: "Random Forest (Classical)", roc_auc: 0.7035, accuracy: 66.87, balanced_accuracy: 63.73, precision_pathogenic: 41.41, recall_pathogenic: 56.97, f1_pathogenic: 0.4796 },
+                    { model: "Logistic Regression (Linear)", roc_auc: 0.5262, accuracy: 54.47, balanced_accuracy: 52.42, precision_pathogenic: 28.94, recall_pathogenic: 48.01, f1_pathogenic: 0.3611 }
+                  ]).map((bm, i) => (
+                    <tr key={i} style={{ fontWeight: bm.model.includes("PennyLane") ? "bold" : "normal" }}>
+                      <td>
+                        {bm.model.includes("PennyLane") && "⚛️ "}
+                        {bm.model.includes("Hist") && "🌳 "}
+                        {bm.model}
+                      </td>
+                      <td>
+                        <div className="qml-benchmark-bar-wrap">
+                          <span style={{ minWidth: "48px", fontFamily: "monospace" }}>{bm.roc_auc}</span>
+                          <div className="qml-benchmark-bar">
+                            <div className="qml-benchmark-fill" style={{ width: `${(bm.roc_auc || 0) * 100}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td>{bm.accuracy}%</td>
+                      <td>{bm.balanced_accuracy}%</td>
+                      <td>{bm.precision_pathogenic}%</td>
+                      <td>{bm.recall_pathogenic}%</td>
+                      <td><b>{bm.f1_pathogenic}</b></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Panel>
+
+          {/* Quantum Circuit Architecture Box */}
+          <Panel title="🔬 Variational Quantum Circuit Architecture & Mathematical Formulation">
+            <div className="qml-circuit-box">
+              <p><b>1. Classical Feature Standardization:</b> Raw input vector <code>x = [ΔH, ΔQ, ΔM]</code> is median-imputed and z-score scaled using parameters fitted strictly on training rows: <code>x_std = (x - μ) / σ</code>, clipped to <code>[-π, π]</code>.</p>
+              <p><b>2. Angle Embedding:</b> 3 qubits are initialized in the ground state <code>|000&rang;</code>. Each standardized feature rotates one qubit along the Pauli-Y axis: <code>|ψ(x)&rang; = ⨂_{i=0}^2 R_y(x_i)|0&rang;</code>.</p>
+              <p><b>3. Parameterized Entangling Layers:</b> 2 layers of <code>StronglyEntanglingLayers(W)</code> apply arbitrary single-qubit rotations followed by cyclic CNOT entanglement gates across all 3 wires.</p>
+              <p><b>4. Readout & Observable Measurement:</b> Pauli-Z expectation value on wire 0 is evaluated: <code>&lang;Z₀&rang; = &lang;ψ|σ_z^(0)|ψ&rang; ∈ [-1, 1]</code>.</p>
+              <p><b>5. Linear Probability Mapping:</b> Expected value is linearly shifted to probability space: <code>P(Pathogenic) = (&lang;Z₀&rang; + 1.0) / 2.0 ∈ [0, 1]</code>.</p>
+            </div>
+          </Panel>
+        </div>
+      )}
+
+      {/* TAB 3: Workflow Trajectory */}
       {activeTab === "workflow" && (
         <div className="xai-tab-content">
           <Panel title="🔄 Step-by-Step Workflow Trace & Analytical Trajectory">
@@ -1502,7 +1815,7 @@ export function Step9({ payload }) {
         </div>
       )}
 
-      {/* TAB 3: Evidence Matrix */}
+      {/* TAB 4: Evidence Matrix */}
       {activeTab === "matrix" && (
         <div className="xai-tab-content">
           <Panel title="📊 Transparent Evidence Matrix (Traceable Scoring Rubric)">
@@ -1542,7 +1855,7 @@ export function Step9({ payload }) {
         </div>
       )}
 
-      {/* TAB 4: Supporting vs Conflicting Evidence */}
+      {/* TAB 5: Supporting vs Conflicting Evidence */}
       {activeTab === "comparison" && (
         <div className="xai-tab-content">
           <div className="two-col">
@@ -1570,7 +1883,7 @@ export function Step9({ payload }) {
         </div>
       )}
 
-      {/* TAB 5: Biophysical & Structural Drivers */}
+      {/* TAB 6: Biophysical & Structural Drivers */}
       {activeTab === "drivers" && (
         <div className="xai-tab-content">
           <div className="two-col">
@@ -1598,7 +1911,7 @@ export function Step9({ payload }) {
         </div>
       )}
 
-      {/* TAB 6: Limitations & Follow-Up */}
+      {/* TAB 7: Limitations & Follow-Up */}
       {activeTab === "followup" && (
         <div className="xai-tab-content">
           <div className="two-col">

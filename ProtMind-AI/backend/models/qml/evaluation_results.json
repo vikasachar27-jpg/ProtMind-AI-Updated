@@ -1,0 +1,103 @@
+{
+  "metadata": {
+    "data": "clinvar_prepared\\clinvar_features.csv",
+    "features": [
+      "hydrophobicity_delta",
+      "charge_delta",
+      "mass_delta"
+    ],
+    "target": "label",
+    "group_column": "gene_id",
+    "seed": 42,
+    "split": "GroupShuffleSplit by gene_id; preprocessing fitted on training set only",
+    "train_rows": 4000,
+    "test_rows": 1500,
+    "qnn_epochs": 8,
+    "qubits": 3,
+    "layers": 2,
+    "note": "Prototype only; not clinically validated. Feature set is limited."
+  },
+  "results": {
+    "logistic_regression": {
+      "n": 1500,
+      "accuracy": 0.5446666666666666,
+      "balanced_accuracy": 0.5242027567082619,
+      "precision_pathogenic": 0.2893553223388306,
+      "recall_pathogenic": 0.48009950248756217,
+      "f1_pathogenic": 0.36108512628624884,
+      "confusion_matrix_labels_0_1": [
+        [
+          624,
+          474
+        ],
+        [
+          209,
+          193
+        ]
+      ],
+      "roc_auc": 0.5261896347044377,
+      "average_precision": 0.33735308394769903
+    },
+    "random_forest": {
+      "n": 1500,
+      "accuracy": 0.6686666666666666,
+      "balanced_accuracy": 0.6372848870402088,
+      "precision_pathogenic": 0.4141048824593128,
+      "recall_pathogenic": 0.5696517412935324,
+      "f1_pathogenic": 0.47958115183246075,
+      "confusion_matrix_labels_0_1": [
+        [
+          774,
+          324
+        ],
+        [
+          173,
+          229
+        ]
+      ],
+      "roc_auc": 0.7035269916356288,
+      "average_precision": 0.4308636802226154
+    },
+    "hist_gradient_boosting": {
+      "n": 1500,
+      "accuracy": 0.7333333333333333,
+      "balanced_accuracy": 0.6049805616725118,
+      "precision_pathogenic": 0.5038167938931297,
+      "recall_pathogenic": 0.3283582089552239,
+      "f1_pathogenic": 0.39759036144578314,
+      "confusion_matrix_labels_0_1": [
+        [
+          968,
+          130
+        ],
+        [
+          270,
+          132
+        ]
+      ],
+      "roc_auc": 0.7083695819626821,
+      "average_precision": 0.43797056398011225
+    },
+    "pennylane_qnn": {
+      "n": 1500,
+      "accuracy": 0.7373333333333333,
+      "balanced_accuracy": 0.5761764945762988,
+      "precision_pathogenic": 0.5227272727272727,
+      "recall_pathogenic": 0.22885572139303484,
+      "f1_pathogenic": 0.31833910034602075,
+      "confusion_matrix_labels_0_1": [
+        [
+          1014,
+          84
+        ],
+        [
+          310,
+          92
+        ]
+      ],
+      "roc_auc": 0.664897280446583,
+      "average_precision": 0.42501835786618425,
+      "train_test_gene_overlap_count": 0
+    }
+  }
+}

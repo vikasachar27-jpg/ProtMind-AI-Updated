@@ -1525,6 +1525,33 @@ def generate_explainable_ai(payload: dict) -> dict:
         "type": "Biophysical Scale"
     })
 
+    # Criterion G: Quantum Machine Learning (PennyLane QNN) & Classical Baseline (HistGradientBoosting)
+    try:
+        from qml_inference import get_qml_engine
+        qml_res = get_qml_engine().predict(mutation=mutation, sequence=seq, uniprot_id=uniprot_id)
+    except Exception as _q_err:
+        qml_res = {"ok": False, "error": str(_q_err)}
+
+    if qml_res.get("ok"):
+        qnn_p = qml_res.get("qnn_prediction", {})
+        hgb_p = qml_res.get("classical_prediction", {})
+        matrix_rows.append({
+            "factor": "Quantum Neural Network (PennyLane default.qubit)",
+            "value": f"P(Pathogenic)={qnn_p.get('probability_pathogenic', 'N/A')} [{qnn_p.get('predicted_class', 'N/A')}]",
+            "direction": qnn_p.get("predicted_class", "Neutral"),
+            "weight": "Exploratory / Research",
+            "source": "PennyLane Hybrid QNN (AngleEmbedding-Y + StronglyEntangling)",
+            "type": "Quantum Machine Learning"
+        })
+        matrix_rows.append({
+            "factor": "HistGradientBoosting Baseline",
+            "value": f"P(Pathogenic)={hgb_p.get('probability_pathogenic', 'N/A')} [{hgb_p.get('predicted_class', 'N/A')}]",
+            "direction": hgb_p.get("predicted_class", "Neutral"),
+            "weight": "Supporting",
+            "source": "Scikit-Learn HistGradientBoostingClassifier",
+            "type": "Classical Ensemble"
+        })
+
     # Final Verdict & Confidence Determination
     if evidence_score >= 5.0:
         verdict = "Pathogenic (Deleterious / Destabilizing)"
@@ -1648,6 +1675,7 @@ def generate_explainable_ai(payload: dict) -> dict:
         "evidence_score": round(evidence_score, 2),
         "primary_mechanism": primary_mechanism,
         "summary_narrative": summary_narrative,
+        "qml": qml_res,
         "workflow_trace": workflow_trace,
         "conservation_evidence": {
             "blosum62_score": blosum,
@@ -1690,7 +1718,9 @@ def generate_explainable_ai(payload: dict) -> dict:
             {"database": "STRING", "version": "v12.0", "role": "Protein-protein interaction network & enriched biological pathways"},
             {"database": "ChEMBL", "version": "v33", "role": "Bioactive ligands, approved drugs & mechanism of action"},
             {"database": "gnomAD", "version": "v4.1", "role": "Population allele frequencies & baseline polymorphism rates"},
-            {"database": "PROCHECK / SAVES", "version": "v3.5.4", "role": "Stereochemical Ramachandran core vs disallowed boundary mapping"}
+            {"database": "PROCHECK / SAVES", "version": "v3.5.4", "role": "Stereochemical Ramachandran core vs disallowed boundary mapping"},
+            {"database": "ClinVar Missense Dataset", "version": "NCBI 2026", "role": "Curated missense variant training data for QNN and classical baseline"},
+            {"database": "PennyLane Quantum Framework", "version": "v0.45 (default.qubit)", "role": "Torch-backed parameterized quantum circuit simulation"}
         ],
         "uncertainties_and_limitations": [
             "Computational Delta-Delta-G calculations are based on empirical biophysical and CHARMM molecular mechanics force field models; they do not account for microsecond solvent relaxation dynamics.",
@@ -2335,7 +2365,26 @@ def generate_pdf_report(payload: dict, ddg_status: str = None, ppi_count: int = 
         pdf.set_text_color(0, 0, 0)
         pdf.cell(20, 4.2, sanitize_pdf_text(row["weight"]), 1, 0, "C")
         pdf.cell(45, 4.2, sanitize_pdf_text(row["source"][:26]), 1, 1, "L")
-    pdf.ln(3)
+    pdf.ln(2)
+
+    if xai.get("qml", {}).get("ok"):
+        qml_d = xai["qml"]
+        qnn_info = qml_d.get("qnn_prediction", {})
+        hgb_info = qml_d.get("classical_prediction", {})
+        pdf.set_font("Arial", "B", 8)
+        pdf.set_text_color(0, 51, 102)
+        pdf.cell(0, 4.5, sanitize_pdf_text("Quantum Neural Network (PennyLane) & Classical Baseline (HGB):"), ln=True)
+        pdf.set_font("Arial", "", 7.2)
+        pdf.set_text_color(30, 30, 30)
+        q_text = (f"QNN: P(Pathogenic)={qnn_info.get('probability_pathogenic', 'N/A')} [{qnn_info.get('predicted_class', 'N/A')}] | "
+                  f"HistGradientBoosting: P(Pathogenic)={hgb_info.get('probability_pathogenic', 'N/A')} [{hgb_info.get('predicted_class', 'N/A')}] | "
+                  f"Deltas: Hydro={qml_d.get('features', {}).get('hydrophobicity_delta')}, "
+                  f"Charge={qml_d.get('features', {}).get('charge_delta')}e, "
+                  f"Mass={qml_d.get('features', {}).get('mass_delta')} Da")
+        pdf.cell(0, 4.0, sanitize_pdf_text(q_text), ln=True)
+        pdf.set_font("Arial", "I", 6.8)
+        pdf.cell(0, 3.8, sanitize_pdf_text("Research prototype executed on default.qubit simulator; not clinically validated."), ln=True)
+    pdf.ln(2)
 
     # ---------------- PAGE 6: LIMITATIONS, FOLLOW-UPS & REFERENCES ----------------
     pdf.add_page()

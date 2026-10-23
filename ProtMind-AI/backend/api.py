@@ -13,6 +13,10 @@ from fastapi.responses import JSONResponse, Response
 from pydantic import BaseModel
 
 import backend as bk
+from qml_inference import get_qml_engine
+
+# Pre-load QML and Classical models once at server startup
+_qml_engine = get_qml_engine()
 
 app = FastAPI(title="ProtMind AI API")
 app.add_middleware(
@@ -296,6 +300,29 @@ def step9_explain(p: Payload):
 @app.post("/api/step9/drugs")
 def step9_drugs_compat(p: Payload):
     return step8(p)
+
+
+# ---------------- STEP 9: Quantum Machine Learning (QML) and Classical Comparison ----------------
+@app.post("/api/step9/qml")
+def step9_qml(p: Payload):
+    """
+    Inference endpoint for Quantum Neural Network (PennyLane default.qubit)
+    and HistGradientBoosting classical baseline on ClinVar-derived physicochemical deltas.
+    """
+    engine = get_qml_engine()
+    return engine.predict(mutation=p.mutation, sequence=p.sequence, uniprot_id=p.uniprot_id)
+
+
+@app.post("/api/qml/predict")
+def qml_predict(p: Payload):
+    """Alias for direct QNN and classical baseline inference."""
+    return step9_qml(p)
+
+
+@app.post("/api/qml/compare")
+def qml_compare(p: Payload):
+    """Comparative benchmarking metrics and predictions."""
+    return step9_qml(p)
 
 
 # ---------------- STEP 10: Automated Clinical Report (PDF) ----------------

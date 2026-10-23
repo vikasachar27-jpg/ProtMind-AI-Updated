@@ -44,7 +44,7 @@ const workflow = [
   {
     n: "09", title: "Explainable Intelligence Summary", short: "Multi-evidence mechanistic reasoning", icon: "🧠",
     desc: "Translate computational predictions and biophysical evidence into transparent mechanistic insights explaining how and why the verdict was issued.",
-    chips: ["Consensus verdict", "Biophysical drivers", "Evidence matrix", "Limitations"]
+    chips: ["Consensus verdict", "Quantum ML (QNN)", "Biophysical drivers", "Evidence matrix", "Limitations"]
   },
   {
     n: "10", title: "Automated Clinical Report", short: "Downloadable self-contained report", icon: "📄",
@@ -62,7 +62,7 @@ const stepPages = [
   { title: "Thermodynamic Stability (ΔG & Potential Energy)", icon: "🔥", sub: "Gibbs free energy (ΔG & ΔΔG), CHARMM potential energy and literature calculations.", Comp: Step6 },
   { title: "Stereochemical Validation (Ramachandran)", icon: "📐", sub: "Backbone Phi/Psi angles on the Ramachandran plot with steric validation.", Comp: Step7 },
   { title: "Therapeutic Targeting", icon: "💊", sub: "ChEMBL drugs, mechanisms, and pharmacological candidates for the target.", Comp: Step8 },
-  { title: "Explainable Intelligence Summary", icon: "🧠", sub: "Automated pathogenicity verdict, multi-evidence rationale, and biophysical drivers.", Comp: Step9 },
+  { title: "Explainable Intelligence Summary", icon: "🧠", sub: "Automated consensus verdict, Quantum ML (QNN), and biophysical drivers.", Comp: Step9 },
   { title: "Automated Clinical Report", icon: "📄", sub: "Self-contained clinical report with complete pipeline outputs and completeness check.", Comp: Step10 },
 ];
 

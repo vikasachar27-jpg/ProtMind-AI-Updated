@@ -81,3 +81,7 @@ export async function fetchReportPdf(payload) {
   });
   return res.blob();
 }
+
+export async function fetchQmlPrediction(payload) {
+  return postJson("/api/step9/qml", payload);
+}
