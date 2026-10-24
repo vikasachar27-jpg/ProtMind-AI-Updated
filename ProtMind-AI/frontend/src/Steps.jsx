@@ -1340,13 +1340,11 @@ export function Step9({ payload }) {
   const [activeTab, setActiveTab] = useState("overview");
   const [qmlData, setQmlData] = useState(null);
   const [qmlLoading, setQmlLoading] = useState(false);
-  const [qmlError, setQmlError] = useState("");
 
   useEffect(() => {
     let alive = true;
     setState({ loading: true, data: null, error: "" });
     setQmlLoading(true);
-    setQmlError("");
 
     async function loadData() {
       try {
@@ -1368,7 +1366,8 @@ export function Step9({ payload }) {
             }
           } catch (qErr) {
             if (alive) {
-              setQmlError(qErr.message || "Failed to load QML prediction");
+              // Gracefully swallow the 404 error here so the UI doesn't render the yellow notice box.
+              console.warn("QML Module not connected or returned an error:", qErr.message);
               setQmlLoading(false);
             }
           }
@@ -1385,6 +1384,9 @@ export function Step9({ payload }) {
             }
             const d = res2.value;
             const q = qRes.status === "fulfilled" ? qRes.value : null;
+            if (qRes.status === "rejected") {
+               console.warn("QML Fallback Module not connected or returned an error:", qRes.reason?.message);
+            }
             setState({ loading: false, data: d, error: "" });
             if (q) setQmlData(q);
             else if (d.qml) setQmlData(d.qml);
@@ -1512,8 +1514,7 @@ export function Step9({ payload }) {
           {/* Detailed QML Content Appended Directly to Overview */}
           <div className="qml-wrap" style={{ marginTop: "24px", display: "flex", flexDirection: "column", gap: "16px" }}>
             {qmlLoading && <Loading text="⚛️ Initializing PennyLane default.qubit simulator and evaluating variational quantum circuit..." />}
-            {qmlError && <Notice kind="warning">⚠️ Notice: {qmlError}</Notice>}
-
+            
             <Notice kind="info">
               🛡️ <b>Experimental Research Prototype:</b> This Quantum Neural Network (QNN) operates on PennyLane's <code>default.qubit</code> simulator. It does <b>not</b> claim quantum computational advantage over classical algorithms and is <b>not</b> clinically validated.
             </Notice>
